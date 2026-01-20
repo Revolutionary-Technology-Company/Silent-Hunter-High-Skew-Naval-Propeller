@@ -1,0 +1,114 @@
+// =================================================================
+// PROJECT: TOROIDAL 'INFINITY' LOOP PROPELLER (BATTLESHIP SCALE)
+// DESIGN:  Continuous Loop / Toroidal Geometry (Sharrow-style)
+// MATH:    Parametric Ribbon Extrusion with Elliptical Tip Arc
+// =================================================================
+
+// --- 1. CONFIGURATION (Unit: Meters) ---
+// Scale: Matching Iowa-Class and Nimitz-Class dimensions [cite: 54, 61]
+prop_diameter = 7.62;    // ~25 ft 
+shaft_diameter = 0.81;   // ~32 inches 
+num_loops = 4;           // 4 Loops (equivalent to 8 attachment points)
+pitch_strength = 2.5;    // High pitch for heavy displacement push
+loop_width_factor = 1.2; // Controls how "wide" the loop opens
+
+// --- 2. MATERIAL SETTINGS ---
+// 0 = NiBrAl (High Strength Alloy) [cite: 30]
+// 1 = Carbon Fiber (Composite/3D Printed) [cite: 25]
+material_mode = 1; 
+
+// Thinner profiles allowed for Carbon Fiber due to stiffness [cite: 29]
+thickness_base = (material_mode == 1) ? 0.09 : 0.15; 
+root_radius = shaft_diameter * 0.7;
+
+// --- 3. ADVANCED MATH MODULES ---
+
+module airfoil_cross_section(w, h) {
+    // Hydrodynamic teardrop shape
+    scale([w, h, 1])
+    circle(r=0.5, $fn=60);
+}
+
+module single_loop() {
+    // This module generates ONE continuous loop blade (Outward + Return leg)
+    // It uses a parametric curve defined by 't' from 0 to 180 degrees
+    
+    steps = 90; 
+    max_r = prop_diameter / 2;
+    
+    union() {
+        for (i = [0 : steps-1]) {
+            // Normalized progress (0.0 to 1.0)
+            t_curr = i / steps;
+            t_next = (i+1) / steps;
+            
+            // MATH: Parametric Loop Definition
+            // We map the loop shape onto a sinusoidal path for smooth curvature
+            
+            // 1. Radius: Starts at root, goes to tip, returns to root
+            // using sin(0 to 180) behavior
+            rad_curr = root_radius + (max_r - root_radius) * sin(t_curr * 180);
+            rad_next = root_radius + (max_r - root_radius) * sin(t_next * 180);
+            
+            // 2. Angle (Sweep): The blade sweeps around the hub as it loops
+            // The return leg is offset to create the "Loop" width
+            ang_curr = (t_curr * 100) + (30 * sin(t_curr * 360)); 
+            ang_next = (t_next * 100) + (30 * sin(t_next * 360));
+            
+            // 3. Axial Pitch (Z): Advances the blade forward through the water
+            z_curr = (t_curr * pitch_strength); 
+            z_next = (t_next * pitch_strength);
+            
+            // 4. Twist: The airfoil must rotate to bite the water
+            twist_curr = 50 - (t_curr * 20);
+            twist_next = 50 - (t_next * 20);
+
+            // 5. Thickness Taper (Thinner at the tip loop for hydrodynamics)
+            th_curr = thickness_base * (1 - 0.4*sin(t_curr*180));
+            th_next = thickness_base * (1 - 0.4*sin(t_next*180));
+
+            hull() {
+                // Current Slice
+                translate([0, 0, z_curr])
+                rotate([0, 0, ang_curr])
+                translate([rad_curr, 0, 0])
+                rotate([twist_curr, 0, 0])
+                airfoil_cross_section(shaft_diameter*0.8, th_curr);
+
+                // Next Slice
+                translate([0, 0, z_next])
+                rotate([0, 0, ang_next])
+                translate([rad_next, 0, 0])
+                rotate([twist_next, 0, 0])
+                airfoil_cross_section(shaft_diameter*0.8, th_next);
+            }
+        }
+    }
+}
+
+module hub() {
+    difference() {
+        // Tapered Main Hub
+        union() {
+            cylinder(h=shaft_diameter*4, r1=shaft_diameter*1.1, r2=shaft_diameter*0.8, center=true, $fn=80);
+            // Hydrodynamic Cap
+            translate([0,0, shaft_diameter*2])
+            sphere(r=shaft_diameter*0.8, $fn=80);
+        }
+        // Shaft Bore (Standard Iowa-Class 32" / 0.81m) [cite: 54]
+        cylinder(h=shaft_diameter*6, r=shaft_diameter*0.5, center=true, $fn=50);
+    }
+}
+
+// --- 4. ASSEMBLY ---
+
+scale([1,1,1]) // Ensure 1:1 scale in meters
+union() {
+    hub();
+    
+    // Distribute the loops around the hub
+    for (b = [0 : num_loops - 1]) {
+        rotate([0, 0, b * (360 / num_loops)])
+        single_loop();
+    }
+}
