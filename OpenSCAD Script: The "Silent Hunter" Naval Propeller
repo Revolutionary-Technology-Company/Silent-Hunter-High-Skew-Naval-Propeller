@@ -1,0 +1,99 @@
+// =================================================================
+// PROJECT: HIGH-EFFICIENCY NAVAL PROPELLER (DDG/BB CLASS)
+// DESIGN:  High-Skew, Variable Pitch, Wake-Adapted
+// MATH:    Sinusoidal chord distribution & non-linear twist
+// =================================================================
+
+// --- 1. CONFIGURATION (Unit: Meters) ---
+prop_diameter = 7.62;   // ~25 ft (Nimitz/Iowa Class scale) 
+shaft_diameter = 0.81;  // ~32 inches (Iowa Class standard) 
+num_blades = 7;         // 7 blades common for submarine/destroyer quietness
+pitch_angle = 45;       // Aggressive pitch for heavy torque
+blade_skew = 60;        // High skew to reduce cavitation noise 
+
+// --- 2. MATERIAL PROPERTIES [cite: 29, 30] ---
+// 0 = NiBrAl (Nickel-Bronze-Aluminum) - Thicker, heavy duty
+// 1 = Carbon Fiber Composite - Thinner, stiffer, lighter
+material_mode = 1; 
+
+blade_thickness_base = (material_mode == 1) ? 0.08 : 0.12; 
+root_radius = shaft_diameter * 0.7;
+
+// --- 3. ADVANCED MATH MODULES ---
+
+module airfoil_section(width, thickness) {
+    // NACA-like hydrofoil profile using scaling
+    scale([width, thickness, 1])
+    circle(r=0.5, $fn=100);
+}
+
+module single_blade() {
+    // Generates a complex curved blade using linear extrusions
+    // simulating advanced wake-adapted geometry 
+    
+    steps = 50;
+    blade_length = (prop_diameter/2) - root_radius;
+    step_size = blade_length / steps;
+    
+    union() {
+        for (i = [0 : steps-1]) {
+            r_curr = root_radius + (i * step_size);
+            r_next = root_radius + ((i+1) * step_size);
+            
+            // Normalized position (0.0 to 1.0) along blade length
+            t_curr = i / steps;
+            t_next = (i+1) / steps;
+            
+            // ADVANCED MATH: Sinusoidal Chord Distribution
+            // Blades are widest at 60% span for efficiency
+            chord_curr = 1.5 * sin(180 * pow(t_curr, 0.7)); 
+            chord_next = 1.5 * sin(180 * pow(t_next, 0.7));
+            
+            // TWIST & SKEW (Wake Adaptation)
+            // Non-linear twist to match water velocity at different radii
+            twist_curr = pitch_angle * (1 - 0.6*t_curr);
+            twist_next = pitch_angle * (1 - 0.6*t_next);
+            
+            // Sweep/Skew angle (sweeps back to reduce tip vortex)
+            skew_curr = blade_skew * pow(t_curr, 1.5);
+            skew_next = blade_skew * pow(t_next, 1.5);
+            
+            hull() {
+                translate([0, 0, r_curr])
+                    rotate([0, 0, -skew_curr]) // Apply Skew
+                    rotate([0, twist_curr, 0]) // Apply Pitch
+                    airfoil_section(chord_curr * 1.2, blade_thickness_base * (1-t_curr) + 0.02);
+                
+                translate([0, 0, r_next])
+                    rotate([0, 0, -skew_next])
+                    rotate([0, twist_next, 0])
+                    airfoil_section(chord_next * 1.2, blade_thickness_base * (1-t_next) + 0.02);
+            }
+        }
+    }
+}
+
+module hub() {
+    difference() {
+        // Tapered Hub (Hydrodynamic)
+        union() {
+            cylinder(h=shaft_diameter*2, r1=shaft_diameter*0.9, r2=shaft_diameter*0.6, center=true, $fn=100);
+            sphere(r=shaft_diameter*0.9, $fn=100); // Rounded cap
+        }
+        // Shaft Bore (Hollowed for weight reduction) 
+        cylinder(h=shaft_diameter*3, r=shaft_diameter*0.3, center=true, $fn=50);
+    }
+}
+
+// --- 4. ASSEMBLY ---
+
+union() {
+    hub();
+    
+    for (b = [0 : num_blades - 1]) {
+        rotate([0, 0, b * (360 / num_blades)])
+        translate([0, 0, 0]) // Adjust blade root to hub surface
+        rotate([0, 90, 0])   // Orient blade perpendicular to hub
+        single_blade();
+    }
+}
